@@ -71,6 +71,11 @@ function load(force){
  $('status').textContent="Status: Ready";
 }
 
+/* wakes the phone's audio output so the first word of the sentence is not clipped */
+function wake(){return new Promise(res=>{
+ try{const c=new (window.AudioContext||window.webkitAudioContext)(),o=c.createOscillator(),g=c.createGain();
+ o.frequency.value=440;g.gain.value=0.04;o.connect(g);g.connect(c.destination);o.start();
+ setTimeout(()=>{o.stop();c.close();setTimeout(res,800)},250)}catch(e){setTimeout(res,800)}})}
 function beep(){return new Promise(res=>{
  try{const c=new (window.AudioContext||window.webkitAudioContext)(),o=c.createOscillator(),g=c.createGain();
  o.frequency.value=1000;g.gain.value=1;o.connect(g);g.connect(c.destination);o.start();
@@ -87,10 +92,13 @@ $('play').onclick=async()=>{
  const ok=await warmMic();
  if(!ok){$('status').textContent="Microphone access denied. Allow it in Chrome: ⋮ → Settings → Site settings → Microphone.";$('play').disabled=false;return}
  $('status').textContent="Status: Playing prompt...";
- const u=new SpeechSynthesisUtterance(sentence); u.lang="en-US"; u.rate=parseFloat($('spd').value);
+ const u=new SpeechSynthesisUtterance(", , "+sentence); u.lang="en-US"; u.rate=parseFloat($('spd').value);
  u.onend=()=>{startRec()};
  u.onerror=()=>{$('play').disabled=false;$('status').textContent="Text-to-speech error"};
+ await wake();
+ speechSynthesis.cancel();
  speechSynthesis.speak(u);
+ try{speechSynthesis.resume()}catch(e){}
 };
 
 let beepDone=false;
