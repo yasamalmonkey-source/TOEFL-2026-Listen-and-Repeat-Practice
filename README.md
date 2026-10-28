@@ -13,7 +13,6 @@ A free, single-file web app for practicing the Listen and Repeat task of TOEFL i
 - Automatic score from 0 to 5 with missing words and grammar words listed
 - Load your own sentences from a .txt file with [Easy], [Medium] and [Hard] sections
 - Session report downloaded as a text file
-- Installable as a web app or packaged as an Android APK
 
 ## Requirements
 
@@ -40,10 +39,6 @@ The professor emphasized that attendance is crucial for passing the final exam.
 [Hard]
 Subtropical regions experience significant changes in precipitation due to global climate patterns.
 ```
-
-## Install on Android
-
-Open the site in Chrome and choose **Add to Home screen**, or package the site as an APK with [PWABuilder](https://www.pwabuilder.com).
 
 ## License
 
