@@ -40,6 +40,7 @@ small{color:#888}
 <button id="rec" disabled>2. Stop & Evaluate 🛑</button>
 <button id="next" disabled>Next Task ➡️</button>
 <button id="show">Show Text (Verify)</button>
+<button id="dl" style="display:none;background:#27ae60">📄 Download Full Report</button>
 <div class="ctx" id="status">Status: Ready</div>
 
 <script>
@@ -49,7 +50,8 @@ let scenarios={
  Medium:["To register for the chemistry seminar, you must complete the prerequisite course.","The professor emphasized that attendance is crucial for passing the final exam."],
  Hard:["Subtropical regions experience significant changes in precipitation due to global climate patterns.","The sociological study suggests that peer pressure directly influences academic performance."]};
 const TOTAL=7, REC_SEC=10;
-let task=1, level="Easy", sentence="", context="", scores=[], log=[], rec=null, recTimer=null, finalText="", evaluated=false;
+let task=1, level="Easy", sentence="", context="", scores=[], log=[], lastReport="";
+let rec=null, recActive=false, recTimer=null, tick=null, accFinal="", curInterim="", lastError="", evaluated=false;
 const $=id=>document.getElementById(id);
 const pick=a=>a[Math.floor(Math.random()*a.length)];
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
@@ -74,74 +76,137 @@ function beep(){return new Promise(res=>{
  o.frequency.value=1000;g.gain.value=1;o.connect(g);g.connect(c.destination);o.start();
  setTimeout(()=>{o.stop();c.close();res()},400)}catch(e){res()}})}
 
-$('play').onclick=()=>{
- $('play').disabled=true; $('status').textContent="Status: Playing prompt...";
+async function warmMic(){
+ try{const st=await navigator.mediaDevices.getUserMedia({audio:true});st.getTracks().forEach(t=>t.stop());return true}
+ catch(e){lastError="not-allowed";return false}
+}
+
+$('play').onclick=async()=>{
+ $('play').disabled=true; lastError="";
+ $('status').textContent="Status: Checking microphone...";
+ const ok=await warmMic();
+ if(!ok){$('status').textContent="Microphone access denied. Allow it in Chrome: ⋮ → Settings → Site settings → Microphone.";$('play').disabled=false;return}
+ $('status').textContent="Status: Playing prompt...";
  const u=new SpeechSynthesisUtterance(sentence); u.lang="en-US"; u.rate=parseFloat($('spd').value);
- u.onend=async()=>{$('status').textContent="Status: [BEEP] Speak now!";await beep();startRec()};
+ u.onend=async()=>{$('status').textContent="Status: [BEEP] Speak now!";await beep();setTimeout(startRec,150)};
  u.onerror=()=>{$('play').disabled=false;$('status').textContent="Text-to-speech error"};
  speechSynthesis.speak(u);
 };
 
 function startRec(){
- if(!SR) return;
- finalText=""; let interim="";
- rec=new SR(); rec.lang="en-US"; rec.interimResults=true; rec.continuous=true;
- rec.onresult=e=>{finalText="";interim="";
-  for(let i=0;i<e.results.length;i++){const t=e.results[i][0].transcript;(e.results[i].isFinal?finalText+=t+" ":interim+=t)}
-  $('recog').textContent='Speech Recognized: "'+(finalText+interim).trim()+'"'};
- rec.onerror=e=>{if(e.error==="not-allowed")$('status').textContent="Microphone access denied"};
- rec.onend=()=>{clearTimeout(recTimer);clearInterval(tick);finish((finalText+interim).trim())};
- rec.start(); $('rec').disabled=false;
- let left=REC_SEC; const tick=setInterval(()=>{left--;$('status').textContent=`🔴 RECORDING... ${left}s`;},1000);
- $('status').textContent=`🔴 RECORDING... ${left}s`;
- recTimer=setTimeout(()=>rec&&rec.stop(),REC_SEC*1000);
+ if(!SR){finish("");return}
+ accFinal="";curInterim="";recActive=true;evaluated=false;
+ $('rec').disabled=false;
+ let left=REC_SEC; $('status').textContent=`🔴 RECORDING... ${left}s`;
+ tick=setInterval(()=>{left--;if(left>=0)$('status').textContent=`🔴 RECORDING... ${left}s`},1000);
+ recTimer=setTimeout(stopRec,REC_SEC*1000);
+ runRec();
 }
-$('rec').onclick=()=>{if(rec)rec.stop()};
+function runRec(){
+ if(!recActive) return;
+ rec=new SR(); rec.lang="en-US"; rec.interimResults=true; rec.continuous=false; rec.maxAlternatives=1;
+ rec.onresult=e=>{
+  let fin="",inter="";
+  for(let i=e.resultIndex;i<e.results.length;i++){
+   const t=e.results[i][0].transcript;
+   if(e.results[i].isFinal) fin+=t+" "; else inter+=t;
+  }
+  if(fin){accFinal+=fin;curInterim=""} else curInterim=inter;
+  $('recog').textContent='Speech Recognized: "'+(accFinal+curInterim).trim()+'"';
+ };
+ rec.onerror=e=>{
+  if(e.error==="no-speech"||e.error==="aborted") return;
+  lastError=e.error;
+  if(["not-allowed","service-not-allowed","audio-capture","network"].includes(e.error)) stopRec();
+ };
+ rec.onend=()=>{
+  if(curInterim){accFinal+=curInterim+" ";curInterim=""}
+  if(recActive) setTimeout(runRec,120); else endRec();
+ };
+ try{rec.start()}catch(e){}
+}
+let ended=false;
+function stopRec(){
+ if(!recActive&&ended) return;
+ recActive=false;
+ try{rec&&rec.stop()}catch(e){}
+ setTimeout(endRec,600);
+}
+function endRec(){
+ clearTimeout(recTimer);clearInterval(tick);
+ if(evaluated) return;
+ finish((accFinal+curInterim).trim());
+}
+$('rec').onclick=stopRec;
 
 const tok=t=>(t.toLowerCase().match(/\b\w+\b/g)||[]);
 const FILL=new Set(['the','a','an','to','in','on','at','for','from','by','of','and','but','or','is','are','was','were','am']);
 function finish(text){
- if(evaluated) return; evaluated=true;
+ if(evaluated) return; evaluated=true; recActive=false;
  $('rec').disabled=true; $('status').textContent="Status: Evaluating...";
  let score,fb,color,crit,m;
- if(!text){score=0;fb="0.0 / 5.0 (No speech detected)";color="#c0392b";crit="No recognizable speech.";text="[No Speech Recognized]";m={}}
- else{
+ if(!text){
+  score=0;fb="0.0 / 5.0 (No speech detected)";color="#c0392b";text="[No Speech Recognized]";
+  crit="Audio waveform did not contain recognizable acoustic signals.";
+  if(lastError) crit+=" (recognizer error: "+lastError+")";
+  m={missing_content:"All",missing_grammar:"All",content_pct:"0%",grammar_pct:"0%",total:"0%"};
+ }else{
   const o=tok(sentence), r=tok(text);
   const oc=o.filter(w=>!FILL.has(w)), og=o.filter(w=>FILL.has(w));
   const mc=oc.filter(w=>!r.includes(w)), mg=og.filter(w=>!r.includes(w));
   const matched=o.filter(w=>r.includes(w)).length;
-  const cr=mc.length/Math.max(1,oc.length), acc=matched/Math.max(1,o.length);
-  if(acc===1){score=5;fb="5.0 / 5.0 (Perfect)";color="#2ecc71";crit="Absolute precision."}
-  else if(cr===0&&mg.length>0){score=4;fb="4.0 / 5.0 (Good)";color="#27ae60";crit="Minor grammatical mismatch. Core vocabulary intact."}
-  else if(cr<=0.25){score=3;fb="3.0 / 5.0 (Fair)";color="#f1c40f";crit="Meaning slightly altered."}
-  else if(acc>=0.40){score=2;fb="2.0 / 5.0 (Limited)";color="#e67e22";crit="Fragmented syntax; key information missing."}
-  else if(acc>=0.10){score=1;fb="1.0 / 5.0 (Weak)";color="#e74c3c";crit="Only scattered words detected."}
-  else{score=0;fb="0.0 / 5.0 (Mismatch)";color="#c0392b";crit="Total mismatch."}
-  m={missing_content:mc.join(", ")||"None",missing_grammar:mg.join(", ")||"None",total:(acc*100).toFixed(1)+"%"};
+  const cr=mc.length/Math.max(1,oc.length), gr=mg.length/Math.max(1,og.length), acc=matched/Math.max(1,o.length);
+  if(acc===1){score=5;fb="5.0 / 5.0 (Perfect)";color="#2ecc71";crit="Absolute precision. Full alignment with original data structure."}
+  else if(cr===0&&mg.length>0){score=4;fb="4.0 / 5.0 (Good)";color="#27ae60";crit="Minor functional/grammatical mismatch. Core academic vocabulary remained completely intact."}
+  else if(cr<=0.25){score=3;fb="3.0 / 5.0 (Fair)";color="#f1c40f";crit="Meaning slightly altered. Most academic vocabulary is recognizable."}
+  else if(acc>=0.40){score=2;fb="2.0 / 5.0 (Limited)";color="#e67e22";crit="Fragmented syntax. Critical elements of the core information are absent."}
+  else if(acc>=0.10){score=1;fb="1.0 / 5.0 (Weak)";color="#e74c3c";crit="Extremely poor output. Only scattered lexical tokens are detected."}
+  else{score=0;fb="0.0 / 5.0 (Mismatch)";color="#c0392b";crit="Unintelligible speech or total lexical mismatch."}
+  m={missing_content:mc.join(", ")||"None",missing_grammar:mg.join(", ")||"None",
+     content_pct:((1-cr)*100).toFixed(1)+"%",grammar_pct:((1-gr)*100).toFixed(1)+"%",total:(acc*100).toFixed(1)+"%"};
  }
  scores.push(score);
  log.push({task,level,context,original:sentence,recognized:text,fb,crit,m});
  $('recog').textContent='Speech Recognized: "'+text+'"';
  $('score').textContent="TOEFL Rubric Score: "+fb; $('score').style.color=color;
- $('detail').textContent=m.total?`Match: ${m.total} | Missing words: ${m.missing_content} | Missing grammar: ${m.missing_grammar}`:crit;
+ $('detail').textContent=`${crit} | Match: ${m.total} | Missing words: ${m.missing_content} | Missing grammar: ${m.missing_grammar}`;
  $('status').textContent="Status: Evaluation complete."; $('next').disabled=false;
 }
+
+function buildReport(avg){
+ const L="=".repeat(75);
+ let s=L+"\nOFFICIAL TOEFL iBT 2026 AUTOMATED SPEECH EVALUATION REPORT\nGenerated on: "+new Date().toLocaleString()+"\n"+L+"\n\n";
+ log.forEach(t=>{
+  s+=`TASK CHRONOLOGY NUMBER: #${t.task}\nTarget Complexity Level: ${t.level}\nAcoustic Context/Setting: ${t.context}\n`+
+  `Given Prompt Input:   "${t.original}"\nUser Speech Response: "${t.recognized}"\n`+"-".repeat(50)+"\n"+
+  `DIAGNOSTIC CRITERIA METRICS:\n`+
+  `  * Total Structural Accuracy Match:  ${t.m.total}\n`+
+  `  * Core Academic Vocab Accuracy:     ${t.m.content_pct}\n`+
+  `  * Grammatical Morphological Match:  ${t.m.grammar_pct}\n`+
+  `  * Missing Core Keywords:            ${t.m.missing_content}\n`+
+  `  * Omitted Functional/Grammar Tags:  ${t.m.missing_grammar}\n`+
+  `  * Automated Scoring Rubric Verdict: ${t.crit}\n`+
+  `FINAL ASSIGNED SCORE FOR TASK #${t.task}: ${t.fb} OUT OF 5.0\n`+L+"\n\n";
+ });
+ s+=`OVERALL CUMULATIVE SCORE SUMMARY:\nFINAL AVERAGE SCORE FOR CONTINUOUS RUN: ${avg.toFixed(2)} / 5.0\n`;
+ return s;
+}
+function downloadReport(){
+ if(!lastReport) return;
+ const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([lastReport],{type:"text/plain;charset=utf-8"}));
+ a.download=`toefl_2026_evaluation_log_${Date.now()}.txt`;document.body.appendChild(a);a.click();a.remove();
+}
+$('dl').onclick=downloadReport;
 
 $('next').onclick=()=>{
  if(task<TOTAL){task++;load();return}
  const avg=scores.reduce((a,b)=>a+b,0)/Math.max(1,scores.length);
- alert(`Completed ${TOTAL} tasks.\nAverage Score: ${avg.toFixed(2)} / 5.0`);
- saveLog(avg); task=1; scores=[]; log=[]; load();
+ lastReport=buildReport(avg);
+ $('dl').style.display="block";
+ alert(`Completed ${TOTAL} tasks.\nAverage Score: ${avg.toFixed(2)} / 5.0\n\nTap "Download Full Report" to save the detailed analysis.`);
+ downloadReport();
+ task=1; scores=[]; log=[]; load();
 };
-function saveLog(avg){
- let s="TOEFL iBT 2026 SPEECH EVALUATION REPORT\n"+new Date().toLocaleString()+"\n"+"=".repeat(60)+"\n\n";
- log.forEach(t=>{s+=`TASK #${t.task} (${t.level})\nContext: ${t.context}\nPrompt:   "${t.original}"\nResponse: "${t.recognized}"\n`+
-  (t.m.total?`Match: ${t.m.total}\nMissing words: ${t.m.missing_content}\nMissing grammar: ${t.m.missing_grammar}\n`:"")+
-  `Verdict: ${t.crit}\nSCORE: ${t.fb}\n${"=".repeat(60)}\n\n`});
- s+=`FINAL AVERAGE: ${avg.toFixed(2)} / 5.0\n`;
- const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([s],{type:"text/plain"}));
- a.download=`toefl_log_${Date.now()}.txt`;a.click();
-}
 $('show').onclick=()=>{$('prompt').textContent=sentence;$('prompt').style.color="#27ae60"};
 $('lvl').onchange=e=>load(e.target.value);
 $('file').onchange=e=>{
