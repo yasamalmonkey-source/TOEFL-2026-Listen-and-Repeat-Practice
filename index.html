@@ -74,7 +74,7 @@ function load(force){
 function beep(){return new Promise(res=>{
  try{const c=new (window.AudioContext||window.webkitAudioContext)(),o=c.createOscillator(),g=c.createGain();
  o.frequency.value=1000;g.gain.value=1;o.connect(g);g.connect(c.destination);o.start();
- setTimeout(()=>{o.stop();c.close();res()},400)}catch(e){res()}})}
+ setTimeout(()=>{o.stop();c.close();res()},250)}catch(e){res()}})}
 
 async function warmMic(){
  try{const st=await navigator.mediaDevices.getUserMedia({audio:true});st.getTracks().forEach(t=>t.stop());return true}
@@ -88,19 +88,26 @@ $('play').onclick=async()=>{
  if(!ok){$('status').textContent="Microphone access denied. Allow it in Chrome: ⋮ → Settings → Site settings → Microphone.";$('play').disabled=false;return}
  $('status').textContent="Status: Playing prompt...";
  const u=new SpeechSynthesisUtterance(sentence); u.lang="en-US"; u.rate=parseFloat($('spd').value);
- u.onend=async()=>{$('status').textContent="Status: [BEEP] Speak now!";await beep();setTimeout(startRec,150)};
+ u.onend=()=>{startRec()};
  u.onerror=()=>{$('play').disabled=false;$('status').textContent="Text-to-speech error"};
  speechSynthesis.speak(u);
 };
 
+let beepDone=false;
 function startRec(){
  if(!SR){finish("");return}
- accFinal="";sessText="";recActive=true;evaluated=false;
- $('rec').disabled=false;
- let left=REC_SEC; $('status').textContent=`🔴 RECORDING... ${left}s`;
- tick=setInterval(()=>{left--;if(left>=0)$('status').textContent=`🔴 RECORDING... ${left}s`},1000);
- recTimer=setTimeout(stopRec,REC_SEC*1000);
+ accFinal="";sessText="";recActive=true;evaluated=false;beepDone=false;
+ $('status').textContent="Status: Opening microphone...";
  runRec();
+ setTimeout(goRecording,1500); /* fallback if the mic-open event never fires */
+}
+function goRecording(){
+ if(beepDone||!recActive) return; beepDone=true;
+ beep(); try{navigator.vibrate&&navigator.vibrate(150)}catch(e){}
+ $('rec').disabled=false;
+ let left=REC_SEC; $('status').textContent=`🔴 SPEAK NOW! ${left}s`;
+ tick=setInterval(()=>{left--;if(left>=0)$('status').textContent=`🔴 SPEAK NOW! ${left}s`},1000);
+ recTimer=setTimeout(stopRec,REC_SEC*1000);
 }
 function runRec(){
  if(!recActive) return;
@@ -116,6 +123,7 @@ function runRec(){
   sessText=out.join(" ");
   $('recog').textContent='Speech Recognized: "'+(accFinal+sessText).trim()+'"';
  };
+ rec.onaudiostart=()=>goRecording();
  rec.onerror=e=>{
   if(e.error==="no-speech"||e.error==="aborted") return;
   lastError=e.error;
@@ -123,7 +131,7 @@ function runRec(){
  };
  rec.onend=()=>{
   if(sessText){accFinal+=sessText+" ";sessText=""}
-  if(recActive) setTimeout(runRec,120); else endRec();
+  if(recActive) runRec(); else endRec();
  };
  try{rec.start()}catch(e){}
 }
