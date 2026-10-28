@@ -51,7 +51,7 @@ let scenarios={
  Hard:["Subtropical regions experience significant changes in precipitation due to global climate patterns.","The sociological study suggests that peer pressure directly influences academic performance."]};
 const TOTAL=7, REC_SEC=10;
 let task=1, level="Easy", sentence="", context="", scores=[], log=[], lastReport="";
-let rec=null, recActive=false, recTimer=null, tick=null, accFinal="", curInterim="", lastError="", evaluated=false;
+let rec=null, recActive=false, recTimer=null, tick=null, accFinal="", sessText="", lastError="", evaluated=false;
 const $=id=>document.getElementById(id);
 const pick=a=>a[Math.floor(Math.random()*a.length)];
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
@@ -95,7 +95,7 @@ $('play').onclick=async()=>{
 
 function startRec(){
  if(!SR){finish("");return}
- accFinal="";curInterim="";recActive=true;evaluated=false;
+ accFinal="";sessText="";recActive=true;evaluated=false;
  $('rec').disabled=false;
  let left=REC_SEC; $('status').textContent=`🔴 RECORDING... ${left}s`;
  tick=setInterval(()=>{left--;if(left>=0)$('status').textContent=`🔴 RECORDING... ${left}s`},1000);
@@ -106,13 +106,15 @@ function runRec(){
  if(!recActive) return;
  rec=new SR(); rec.lang="en-US"; rec.interimResults=true; rec.continuous=false; rec.maxAlternatives=1;
  rec.onresult=e=>{
-  let fin="",inter="";
-  for(let i=e.resultIndex;i<e.results.length;i++){
-   const t=e.results[i][0].transcript;
-   if(e.results[i].isFinal) fin+=t+" "; else inter+=t;
+  /* Android Chrome returns cumulative partial results ("the", "the clinic", ...): merge them instead of appending */
+  const out=[];
+  for(let i=0;i<e.results.length;i++){
+   const t=e.results[i][0].transcript.trim(); if(!t) continue;
+   if(out.length && t.toLowerCase().startsWith(out[out.length-1].toLowerCase())) out[out.length-1]=t;
+   else out.push(t);
   }
-  if(fin){accFinal+=fin;curInterim=""} else curInterim=inter;
-  $('recog').textContent='Speech Recognized: "'+(accFinal+curInterim).trim()+'"';
+  sessText=out.join(" ");
+  $('recog').textContent='Speech Recognized: "'+(accFinal+sessText).trim()+'"';
  };
  rec.onerror=e=>{
   if(e.error==="no-speech"||e.error==="aborted") return;
@@ -120,7 +122,7 @@ function runRec(){
   if(["not-allowed","service-not-allowed","audio-capture","network"].includes(e.error)) stopRec();
  };
  rec.onend=()=>{
-  if(curInterim){accFinal+=curInterim+" ";curInterim=""}
+  if(sessText){accFinal+=sessText+" ";sessText=""}
   if(recActive) setTimeout(runRec,120); else endRec();
  };
  try{rec.start()}catch(e){}
@@ -135,7 +137,7 @@ function stopRec(){
 function endRec(){
  clearTimeout(recTimer);clearInterval(tick);
  if(evaluated) return;
- finish((accFinal+curInterim).trim());
+ finish((accFinal+sessText).trim());
 }
 $('rec').onclick=stopRec;
 
@@ -209,13 +211,16 @@ $('next').onclick=()=>{
 };
 $('show').onclick=()=>{$('prompt').textContent=sentence;$('prompt').style.color="#27ae60"};
 $('lvl').onchange=e=>load(e.target.value);
+function parseScenarios(t){
+ const p={Easy:[],Medium:[],Hard:[]};let sec=null;
+ t.split(/\r?\n/).forEach(l=>{l=l.trim();if(!l)return;const k=l.toLowerCase();
+  if(k==="[easy]")sec="Easy";else if(k==="[medium]")sec="Medium";else if(k==="[hard]")sec="Hard";else if(sec)p[sec].push(l)});
+ return p;
+}
 $('file').onchange=e=>{
  const f=e.target.files[0]; if(!f)return;
  f.text().then(t=>{
-  const p={Easy:[],Medium:[],Hard:[]};let sec=null;
-  t.split(/\r?\n/).forEach(l=>{l=l.trim();if(!l)return;const k=l.toLowerCase();
-   if(k==="[easy]")sec="Easy";else if(k==="[medium]")sec="Medium";else if(k==="[hard]")sec="Hard";else if(sec)p[sec].push(l)});
-  const n=p.Easy.length+p.Medium.length+p.Hard.length;
+  const p=parseScenarios(t), n=p.Easy.length+p.Medium.length+p.Hard.length;
   if(n){scenarios=p;alert(`Loaded: Easy ${p.Easy.length}, Medium ${p.Medium.length}, Hard ${p.Hard.length}`);load()}
   else alert("Tags [Easy], [Medium], [Hard] not found.");
  });
@@ -223,6 +228,10 @@ $('file').onchange=e=>{
 try{const s=localStorage.getItem("spd");if(s){$('spd').value=s;$('spdv').textContent=s}}catch(e){}
 $('spd').oninput=e=>{$('spdv').textContent=e.target.value;try{localStorage.setItem("spd",e.target.value)}catch(_){}};
 load();
+fetch("scenarios.txt",{cache:"no-store"}).then(r=>r.ok?r.text():Promise.reject()).then(t=>{
+ const p=parseScenarios(t), n=p.Easy.length+p.Medium.length+p.Hard.length;
+ if(n){scenarios=p;if(!$('play').disabled||$('next').disabled)load();$('status').textContent=`Status: Loaded scenarios.txt (${n} sentences)`}
+}).catch(()=>{});
 </script>
 </body>
 </html>
