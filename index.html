@@ -81,6 +81,7 @@ function beep(){return new Promise(res=>{
  o.frequency.value=1000;g.gain.value=1;o.connect(g);g.connect(c.destination);o.start();
  setTimeout(()=>{o.stop();c.close();res()},250)}catch(e){res()}})}
 
+let micChecked=false;
 async function warmMic(){
  try{const st=await navigator.mediaDevices.getUserMedia({audio:true});st.getTracks().forEach(t=>t.stop());return true}
  catch(e){lastError="not-allowed";return false}
@@ -88,15 +89,23 @@ async function warmMic(){
 
 $('play').onclick=async()=>{
  $('play').disabled=true; lastError="";
- $('status').textContent="Status: Checking microphone...";
- const ok=await warmMic();
- if(!ok){$('status').textContent="Microphone access denied. Allow it in Chrome: ⋮ → Settings → Site settings → Microphone.";$('play').disabled=false;return}
+ if(!micChecked){
+  /* asking for the mic switches Android into call-audio mode; do it only once and let the audio settle */
+  let granted=false;
+  try{const q=await navigator.permissions.query({name:"microphone"});granted=(q.state==="granted")}catch(e){}
+  if(!granted){
+   $('status').textContent="Status: Please allow the microphone...";
+   const ok=await warmMic();
+   if(!ok){$('status').textContent="Microphone access denied. Allow it in Chrome: ⋮ → Settings → Site settings → Microphone.";$('play').disabled=false;return}
+   await new Promise(r=>setTimeout(r,2000));
+  }
+  micChecked=true;
+ }
  $('status').textContent="Status: Playing prompt...";
  const u=new SpeechSynthesisUtterance(", , "+sentence); u.lang="en-US"; u.rate=parseFloat($('spd').value);
  u.onend=()=>{startRec()};
  u.onerror=()=>{$('play').disabled=false;$('status').textContent="Text-to-speech error"};
  await wake();
- speechSynthesis.cancel();
  speechSynthesis.speak(u);
  try{speechSynthesis.resume()}catch(e){}
 };
