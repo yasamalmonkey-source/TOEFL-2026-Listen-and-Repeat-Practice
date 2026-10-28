@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TOEFL Listen & Repeat</title>
+<style>
+body{font-family:Helvetica,Arial,sans-serif;margin:0;padding:14px;background:#f5f6fa;color:#2c3e50;max-width:640px;margin:auto}
+h1{font-size:22px;text-align:center;margin:6px 0}
+.info{text-align:center;color:#e67e22;font-weight:bold}
+.ctx{text-align:center;color:#7f8c8d;font-style:italic;margin:6px 0}
+.box{background:#fff;border-radius:10px;padding:12px;margin:10px 0;box-shadow:0 1px 3px #0002}
+button{width:100%;padding:14px;margin:5px 0;font-size:16px;font-weight:bold;border:0;border-radius:8px;color:#fff;background:#3498db}
+button:disabled{background:#ccc;color:#888}
+#rec{background:#e74c3c}#next{background:#2c3e50}#show{background:#95a5a6}
+#prompt{font-size:18px;text-align:center;font-weight:bold;min-height:50px}
+#score{font-size:20px;font-weight:bold;text-align:center;color:#d35400}
+select,input{width:100%;padding:8px;font-size:15px;margin:4px 0}
+small{color:#888}
+</style>
+</head>
+<body>
+<h1>TOEFL iBT 2026: Listen & Repeat</h1>
+<div class="info" id="info"></div>
+<div class="ctx" id="ctx"></div>
+<div class="box">
+ <select id="lvl"><option>Easy</option><option>Medium</option><option>Hard</option></select>
+ <label style="font-size:14px">Speech speed: <b id="spdv">0.7</b></label>
+ <input type="range" id="spd" min="0.3" max="1.2" step="0.05" value="0.7">
+ <input type="file" id="file" accept=".txt">
+ <small>.txt file: sections [Easy], [Medium], [Hard], one sentence per line.</small>
+</div>
+<div class="box"><div id="prompt"></div></div>
+<div class="box">
+ <div id="recog">Speech Recognized: —</div>
+ <div id="score">TOEFL Score: —</div>
+ <div id="detail" style="font-size:13px;color:#666;margin-top:6px"></div>
+</div>
+<button id="play">1. Play Audio 🔊</button>
+<button id="rec" disabled>2. Stop & Evaluate 🛑</button>
+<button id="next" disabled>Next Task ➡️</button>
+<button id="show">Show Text (Verify)</button>
+<div class="ctx" id="status">Status: Ready</div>
+
+<script>
+const CAMPUS=["You are talking to a professor during office hours.","You are attending a student orientation at the university library.","You are discussing a group project with a classmate in the student lounge.","You are listening to an introductory biochemistry lecture.","You are asking for help at the campus bookstore information desk.","You are listening to an advisor explain graduation requirements.","You are participating in a seminar discussion on microeconomics."];
+let scenarios={
+ Easy:["The library will close early this Friday for maintenance.","Please submit your biology assignment before noon tomorrow."],
+ Medium:["To register for the chemistry seminar, you must complete the prerequisite course.","The professor emphasized that attendance is crucial for passing the final exam."],
+ Hard:["Subtropical regions experience significant changes in precipitation due to global climate patterns.","The sociological study suggests that peer pressure directly influences academic performance."]};
+const TOTAL=7, REC_SEC=10;
+let task=1, level="Easy", sentence="", context="", scores=[], log=[], rec=null, recTimer=null, finalText="", evaluated=false;
+const $=id=>document.getElementById(id);
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+if(!SR) $('status').textContent="⚠ Speech recognition is not supported. Please open in Chrome.";
+
+function load(force){
+ speechSynthesis.cancel();
+ level=force||(task<=2?"Easy":task<=5?"Medium":"Hard");
+ $('lvl').value=level;
+ $('info').textContent=`Task ${task} of ${TOTAL} (Level: ${level})`;
+ context=pick(CAMPUS); $('ctx').textContent="Scenario: "+context;
+ if(!scenarios[level].length){$('prompt').textContent="[ No sentences loaded. Please load a file ]";return}
+ sentence=pick(scenarios[level]); evaluated=false;
+ $('prompt').textContent="🔊 Press Play Audio"; $('prompt').style.color="#2980b9";
+ $('recog').textContent="Speech Recognized: —"; $('score').textContent="TOEFL Score: —"; $('score').style.color="#d35400"; $('detail').textContent="";
+ $('play').disabled=false; $('rec').disabled=true; $('next').disabled=true;
+ $('status').textContent="Status: Ready";
+}
+
+function beep(){return new Promise(res=>{
+ try{const c=new (window.AudioContext||window.webkitAudioContext)(),o=c.createOscillator(),g=c.createGain();
+ o.frequency.value=1000;g.gain.value=1;o.connect(g);g.connect(c.destination);o.start();
+ setTimeout(()=>{o.stop();c.close();res()},400)}catch(e){res()}})}
+
+$('play').onclick=()=>{
+ $('play').disabled=true; $('status').textContent="Status: Playing prompt...";
+ const u=new SpeechSynthesisUtterance(sentence); u.lang="en-US"; u.rate=parseFloat($('spd').value);
+ u.onend=async()=>{$('status').textContent="Status: [BEEP] Speak now!";await beep();startRec()};
+ u.onerror=()=>{$('play').disabled=false;$('status').textContent="Text-to-speech error"};
+ speechSynthesis.speak(u);
+};
+
+function startRec(){
+ if(!SR) return;
+ finalText=""; let interim="";
+ rec=new SR(); rec.lang="en-US"; rec.interimResults=true; rec.continuous=true;
+ rec.onresult=e=>{finalText="";interim="";
+  for(let i=0;i<e.results.length;i++){const t=e.results[i][0].transcript;(e.results[i].isFinal?finalText+=t+" ":interim+=t)}
+  $('recog').textContent='Speech Recognized: "'+(finalText+interim).trim()+'"'};
+ rec.onerror=e=>{if(e.error==="not-allowed")$('status').textContent="Microphone access denied"};
+ rec.onend=()=>{clearTimeout(recTimer);clearInterval(tick);finish((finalText+interim).trim())};
+ rec.start(); $('rec').disabled=false;
+ let left=REC_SEC; const tick=setInterval(()=>{left--;$('status').textContent=`🔴 RECORDING... ${left}s`;},1000);
+ $('status').textContent=`🔴 RECORDING... ${left}s`;
+ recTimer=setTimeout(()=>rec&&rec.stop(),REC_SEC*1000);
+}
+$('rec').onclick=()=>{if(rec)rec.stop()};
+
+const tok=t=>(t.toLowerCase().match(/\b\w+\b/g)||[]);
+const FILL=new Set(['the','a','an','to','in','on','at','for','from','by','of','and','but','or','is','are','was','were','am']);
+function finish(text){
+ if(evaluated) return; evaluated=true;
+ $('rec').disabled=true; $('status').textContent="Status: Evaluating...";
+ let score,fb,color,crit,m;
+ if(!text){score=0;fb="0.0 / 5.0 (No speech detected)";color="#c0392b";crit="No recognizable speech.";text="[No Speech Recognized]";m={}}
+ else{
+  const o=tok(sentence), r=tok(text);
+  const oc=o.filter(w=>!FILL.has(w)), og=o.filter(w=>FILL.has(w));
+  const mc=oc.filter(w=>!r.includes(w)), mg=og.filter(w=>!r.includes(w));
+  const matched=o.filter(w=>r.includes(w)).length;
+  const cr=mc.length/Math.max(1,oc.length), acc=matched/Math.max(1,o.length);
+  if(acc===1){score=5;fb="5.0 / 5.0 (Perfect)";color="#2ecc71";crit="Absolute precision."}
+  else if(cr===0&&mg.length>0){score=4;fb="4.0 / 5.0 (Good)";color="#27ae60";crit="Minor grammatical mismatch. Core vocabulary intact."}
+  else if(cr<=0.25){score=3;fb="3.0 / 5.0 (Fair)";color="#f1c40f";crit="Meaning slightly altered."}
+  else if(acc>=0.40){score=2;fb="2.0 / 5.0 (Limited)";color="#e67e22";crit="Fragmented syntax; key information missing."}
+  else if(acc>=0.10){score=1;fb="1.0 / 5.0 (Weak)";color="#e74c3c";crit="Only scattered words detected."}
+  else{score=0;fb="0.0 / 5.0 (Mismatch)";color="#c0392b";crit="Total mismatch."}
+  m={missing_content:mc.join(", ")||"None",missing_grammar:mg.join(", ")||"None",total:(acc*100).toFixed(1)+"%"};
+ }
+ scores.push(score);
+ log.push({task,level,context,original:sentence,recognized:text,fb,crit,m});
+ $('recog').textContent='Speech Recognized: "'+text+'"';
+ $('score').textContent="TOEFL Rubric Score: "+fb; $('score').style.color=color;
+ $('detail').textContent=m.total?`Match: ${m.total} | Missing words: ${m.missing_content} | Missing grammar: ${m.missing_grammar}`:crit;
+ $('status').textContent="Status: Evaluation complete."; $('next').disabled=false;
+}
+
+$('next').onclick=()=>{
+ if(task<TOTAL){task++;load();return}
+ const avg=scores.reduce((a,b)=>a+b,0)/Math.max(1,scores.length);
+ alert(`Completed ${TOTAL} tasks.\nAverage Score: ${avg.toFixed(2)} / 5.0`);
+ saveLog(avg); task=1; scores=[]; log=[]; load();
+};
+function saveLog(avg){
+ let s="TOEFL iBT 2026 SPEECH EVALUATION REPORT\n"+new Date().toLocaleString()+"\n"+"=".repeat(60)+"\n\n";
+ log.forEach(t=>{s+=`TASK #${t.task} (${t.level})\nContext: ${t.context}\nPrompt:   "${t.original}"\nResponse: "${t.recognized}"\n`+
+  (t.m.total?`Match: ${t.m.total}\nMissing words: ${t.m.missing_content}\nMissing grammar: ${t.m.missing_grammar}\n`:"")+
+  `Verdict: ${t.crit}\nSCORE: ${t.fb}\n${"=".repeat(60)}\n\n`});
+ s+=`FINAL AVERAGE: ${avg.toFixed(2)} / 5.0\n`;
+ const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([s],{type:"text/plain"}));
+ a.download=`toefl_log_${Date.now()}.txt`;a.click();
+}
+$('show').onclick=()=>{$('prompt').textContent=sentence;$('prompt').style.color="#27ae60"};
+$('lvl').onchange=e=>load(e.target.value);
+$('file').onchange=e=>{
+ const f=e.target.files[0]; if(!f)return;
+ f.text().then(t=>{
+  const p={Easy:[],Medium:[],Hard:[]};let sec=null;
+  t.split(/\r?\n/).forEach(l=>{l=l.trim();if(!l)return;const k=l.toLowerCase();
+   if(k==="[easy]")sec="Easy";else if(k==="[medium]")sec="Medium";else if(k==="[hard]")sec="Hard";else if(sec)p[sec].push(l)});
+  const n=p.Easy.length+p.Medium.length+p.Hard.length;
+  if(n){scenarios=p;alert(`Loaded: Easy ${p.Easy.length}, Medium ${p.Medium.length}, Hard ${p.Hard.length}`);load()}
+  else alert("Tags [Easy], [Medium], [Hard] not found.");
+ });
+};
+try{const s=localStorage.getItem("spd");if(s){$('spd').value=s;$('spdv').textContent=s}}catch(e){}
+$('spd').oninput=e=>{$('spdv').textContent=e.target.value;try{localStorage.setItem("spd",e.target.value)}catch(_){}};
+load();
+</script>
+</body>
+</html>
