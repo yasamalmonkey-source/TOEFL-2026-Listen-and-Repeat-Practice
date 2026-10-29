@@ -202,7 +202,7 @@ function finish(text){
 
 function buildReport(avg){
  const L="=".repeat(75);
- let s=L+"\nOFFICIAL TOEFL iBT 2026 AUTOMATED SPEECH EVALUATION REPORT\nGenerated on: "+new Date().toLocaleString()+"\n"+L+"\n\n";
+ let s=L+"\nTOEFL iBT 2026 AUTOMATED SPEECH EVALUATION REPORT\nGenerated on: "+new Date().toLocaleString()+"\n"+L+"\n\n";
  log.forEach(t=>{
   s+=`TASK CHRONOLOGY NUMBER: #${t.task}\nTarget Complexity Level: ${t.level}\nAcoustic Context/Setting: ${t.context}\n`+
   `Given Prompt Input:   "${t.original}"\nUser Speech Response: "${t.recognized}"\n`+"-".repeat(50)+"\n"+
